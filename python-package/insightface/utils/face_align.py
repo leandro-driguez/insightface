@@ -30,6 +30,7 @@ def norm_crop(img, landmark, image_size=112, mode='arcface'):
     return warped
 
 def norm_crop2(img, landmark, image_size=112, mode='arcface'):
+    print(img)
     M = estimate_norm(landmark, image_size, mode)
     warped = cv2.warpAffine(img, M, (image_size, image_size), borderValue=0.0)
     return warped, M

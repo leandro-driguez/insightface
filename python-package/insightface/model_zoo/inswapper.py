@@ -1,12 +1,10 @@
-import time
-import numpy as np
-import onnxruntime
 import cv2
 import onnx
+import numpy as np
+import onnxruntime
 from onnx import numpy_helper
 from ..utils import face_align
-
-
+from ..utils import embed_image
 
 
 class INSwapper():
@@ -37,6 +35,7 @@ class INSwapper():
         self.input_shape = input_shape
         print('inswapper-shape:', self.input_shape)
         self.input_size = tuple(input_shape[2:4][::-1])
+        # self.input_size = (256, 256)
 
     def forward(self, img, latent):
         img = (img - self.input_mean) / self.input_std
@@ -44,31 +43,59 @@ class INSwapper():
         return pred
 
     def get(self, img, target_face, source_face, paste_back=True):
+        # aimg, M = face_align.norm_crop2(img, target_face.kps, 512)
         aimg, M = face_align.norm_crop2(img, target_face.kps, self.input_size[0])
-        blob = cv2.dnn.blobFromImage(aimg, 1.0 / self.input_std, self.input_size,
+        
+        blob = cv2.dnn.blobFromImage(cv2.resize(aimg, (128, 128)), 1.0 / self.input_std, self.input_size,
                                       (self.input_mean, self.input_mean, self.input_mean), swapRB=True)
+        
         latent = source_face.normed_embedding.reshape((1,-1))
         latent = np.dot(latent, self.emap)
         latent /= np.linalg.norm(latent)
         pred = self.session.run(self.output_names, {self.input_names[0]: blob, self.input_names[1]: latent})[0]
-        #print(latent.shape, latent.dtype, pred.shape)
+        
         img_fake = pred.transpose((0,2,3,1))[0]
         bgr_fake = np.clip(255 * img_fake, 0, 255).astype(np.uint8)[:,:,::-1]
+        # bgr_fake = cv2.imread('./a.7_out.png')
+        # bgr_fake = cv2.cvtColor(bgr_fake, cv2.COLOR_RGB2BGR)
+        
         if not paste_back:
             return bgr_fake, M
         else:
             target_img = img
+            print(bgr_fake.shape, aimg.shape)
+            # print(bgr_fake.shape)
+            print(img_fake.shape)
+            from PIL import Image
+            Image.fromarray(aimg).save('./aimg.png', format='png')
+            Image.fromarray(bgr_fake).save('./bgr_fake.png', format='png')
             fake_diff = bgr_fake.astype(np.float32) - aimg.astype(np.float32)
+            print('!@#$%^&*(_)+!@#$%^&*(_)+!@#$%^&*(_)+!@#$%^&*(_)+')
+            print(fake_diff.shape)
             fake_diff = np.abs(fake_diff).mean(axis=2)
             fake_diff[:2,:] = 0
             fake_diff[-2:,:] = 0
             fake_diff[:,:2] = 0
             fake_diff[:,-2:] = 0
+            print(fake_diff.shape)
             IM = cv2.invertAffineTransform(M)
             img_white = np.full((aimg.shape[0],aimg.shape[1]), 255, dtype=np.float32)
+            
+            # print(bgr_fake.shape)
+            # bgr_fake = cv2.resize(bgr_fake, (128,128))
+            # print(target_img.shape[1], target_img.shape[0]) 
+        
             bgr_fake = cv2.warpAffine(bgr_fake, IM, (target_img.shape[1], target_img.shape[0]), borderValue=0.0)
             img_white = cv2.warpAffine(img_white, IM, (target_img.shape[1], target_img.shape[0]), borderValue=0.0)
             fake_diff = cv2.warpAffine(fake_diff, IM, (target_img.shape[1], target_img.shape[0]), borderValue=0.0)
+            
+            # bgr_fake = embed_image(bgr_fake, cv2.cvtColor(cv2.imread('./a.7_out.png'), cv2.COLOR_RGB2BGR))
+            Image.fromarray(bgr_fake).save('./b.1.png', format='png')
+            # print(img_white.shape, fake_diff.shape)
+            # Image.fromarray(img_white).save('./b.2.png', format='png')
+            # Image.fromarray(fake_diff).save('./b.3.png', format='png')
+            
+            
             img_white[img_white>20] = 255
             fthresh = 10
             fake_diff[fake_diff<fthresh] = 0
@@ -102,4 +129,3 @@ class INSwapper():
             fake_merged = img_mask * bgr_fake + (1-img_mask) * target_img.astype(np.float32)
             fake_merged = fake_merged.astype(np.uint8)
             return fake_merged
-
